@@ -45,3 +45,14 @@ DiscordHtmlTranscripts transcript = DiscordHtmlTranscripts.getInstance();
 transcript.generateFromMessages(messages); // return to InputStream
 ```
 
+### You can also put the transcript into a variable
+```java
+DiscordHtmlTranscripts transcripts = new DiscordHtmlTranscripts();
+try {
+	testChannel.sendFiles(transcripts.getTranscript(testChannel, "test.html")).queue();
+} catch (IOException e) {
+	throw new RuntimeException(e);
+}
+```
+
+

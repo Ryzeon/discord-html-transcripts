@@ -1,21 +1,29 @@
 package me.ryzeon.transcripts;
 
-import lombok.var;
-import net.dv8tion.jda.api.entities.*;
+import lombok.Getter;
+import net.dv8tion.jda.api.entities.ISnowflake;
+import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.utils.FileUpload;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
-import java.awt.*;
-import java.io.*;
-import java.net.URL;;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Created by Ryzeon
+ * Edited by Incbom
  * Project: discord-html-transcripts
  * Date: 2/12/21 @ 00:32
  * Twitter: @Ryzeon_ 😎
@@ -29,39 +37,61 @@ public class DiscordHtmlTranscripts {
             audioFormats = Arrays.asList("mp3", "wav", "ogg", "flac");
 
 
+    @Getter
     private static final DiscordHtmlTranscripts instance = new DiscordHtmlTranscripts();
 
-    public static DiscordHtmlTranscripts getInstance() {
-        return instance;
-    }
-
+    /**
+     * This method sends the transcript in the channel it is logging. To get the FileUpload object, use {@link #getTranscript(TextChannel, String)}. To get the InputStream object, use {@link #generateFromMessages(Collection)}.
+     * @param channel Channel to generate transcript from
+     */
     public void createTranscript(TextChannel channel) throws IOException {
-        createTranscript(channel, null);
+        createTranscript(channel, "transcript.html");
     }
 
-    public void createTranscript(TextChannel channel, String fileName) throws IOException {
-        channel.sendFile(generateFromMessages(channel.getIterableHistory().stream().collect(Collectors.toList())), fileName != null ? fileName : "transcript.html").queue();
+    /**
+     * This method sends the transcript in the channel it is logging. To get the InputStream object, use {@link #generateFromMessages(Collection)}.
+     * @param channel Channel to generate transcript from
+     * @param fileName Name of the file
+     * @return Returns a usable FileUpload object to send to a channel
+     */
+    public FileUpload getTranscript(TextChannel channel, String fileName) throws IOException {
+        return FileUpload.fromData((generateFromMessages(channel.getIterableHistory().stream().collect(Collectors.toList()))), fileName);
     }
 
-    public InputStream generateFromMessages(Collection<Message> messages) throws IOException {
-        File htmlTemplate = findFile("template.html");
+    private void createTranscript(TextChannel channel, String fileName) throws IOException {
+        FileUpload transcript = FileUpload.fromData((generateFromMessages(channel.getIterableHistory().stream().collect(Collectors.toList()))), fileName != null ? fileName : "transcript.html");
+        channel.sendFiles(transcript).queue();;
+    }
+
+    private InputStream generateFromMessages(Collection<Message> messages) throws IOException {
+        InputStream htmlTemplate = findFile();
         if (messages.isEmpty()) {
             throw new IllegalArgumentException("No messages to generate a transcript from");
         }
-        TextChannel channel = messages.iterator().next().getTextChannel();
-        Document document = Jsoup.parse(htmlTemplate, "UTF-8");
+        TextChannel channel = messages.iterator().next().getJDA().getTextChannelById(messages.iterator().next().getChannel().getId());
+        Document document = Jsoup.parse(htmlTemplate, "UTF-8", "");
         document.outputSettings().indentAmount(0).prettyPrint(true);
-        document.getElementsByClass("preamble__guild-icon")
-                .first().attr("src", channel.getGuild().getIconUrl()); // set guild icon
+        assert channel != null;
+        Element preambleGuildIcon = document.getElementsByClass("preamble__guild-icon").first();
+        String guildIconUrl = channel.getGuild().getIconUrl();
 
-        document.getElementById("transcriptTitle").text(channel.getName()); // set title
-        document.getElementById("guildname").text(channel.getGuild().getName()); // set guild name
-        document.getElementById("ticketname").text(channel.getName()); // set channel name
+        if (preambleGuildIcon != null && guildIconUrl != null) {
+            preambleGuildIcon.attr("src", guildIconUrl);
+        } else {
+            preambleGuildIcon.attr("src", "https://guild-studio.com/wp-content/uploads/2021/05/s9biyhs4lix61.jpg");
+        }
+        Objects.requireNonNull(document.getElementById("transcriptTitle")).text(channel.getName()); // set title
+        Objects.requireNonNull(document.getElementById("guildname")).text(channel.getGuild().getName()); // set guild name
+        Objects.requireNonNull(document.getElementById("ticketname")).text(channel.getName()); // set channel name
 
         Element chatLog = document.getElementById("chatlog"); // chat log
         for (Message message : messages.stream()
                 .sorted(Comparator.comparing(ISnowflake::getTimeCreated))
-                .collect(Collectors.toList())) {
+                .toList()) {
+
+            if (message.getAuthor().isBot()) {
+                continue;
+            }
             // create message group
             Element messageGroup = document.createElement("div");
             messageGroup.addClass("chatlog__message-group");
@@ -79,27 +109,17 @@ public class DiscordHtmlTranscripts {
 
                 var referenceMessage = message.getReferencedMessage();
                 User author = referenceMessage.getAuthor();
-                Member member = channel.getGuild().getMember(author);
-                var color = Formatter.toHex(Objects.requireNonNull(member.getColor()));
 
                 //        System.out.println("REFERENCE MSG " + referenceMessage.getContentDisplay());
-                reference.html("<img class=\"chatlog__reference-avatar\" src=\""
-                        + author.getAvatarUrl() + "\" alt=\"Avatar\" loading=\"lazy\">" +
-                        "<span class=\"chatlog__reference-name\" title=\"" + author.getName()
-                        + "\" style=\"color: " + color + "\">" + author.getName() + "\"</span>" +
-                        "<div class=\"chatlog__reference-content\">" +
-                        " <span class=\"chatlog__reference-link\" onclick=\"scrollToMessage(event, '"
-                        + referenceMessage.getId() + "')\">" +
-                        "<em>" +
-                        referenceMessage.getContentDisplay() != null
-                        ? referenceMessage.getContentDisplay().length() > 42
+                author.getAvatarUrl();
+                author.getName();
+                author.getName();
+                referenceMessage.getId();
+                referenceMessage.getContentDisplay();
+                reference.html(referenceMessage.getContentDisplay().length() > 42
                         ? referenceMessage.getContentDisplay().substring(0, 42)
                         + "..."
-                        : referenceMessage.getContentDisplay()
-                        : "Click to see attachment" +
-                        "</em>" +
-                        "</span>" +
-                        "</div>");
+                        : referenceMessage.getContentDisplay());
 
                 messageGroup.appendChild(referenceSymbol);
                 messageGroup.appendChild(reference);
@@ -112,9 +132,24 @@ public class DiscordHtmlTranscripts {
 
             Element authorAvatar = document.createElement("img");
             authorAvatar.addClass("chatlog__author-avatar");
-            authorAvatar.attr("src", author.getAvatarUrl());
             authorAvatar.attr("alt", "Avatar");
             authorAvatar.attr("loading", "lazy");
+
+            Element authorName = document.createElement("span");
+            authorName.addClass("chatlog__author-name");
+
+            if (author != null) {
+                authorName.attr("title", Objects.requireNonNull(author.getGlobalName()));
+                authorName.text(author.getName());
+                authorName.attr("data-user-id", author.getId());
+                authorAvatar.attr("src", Objects.requireNonNull(author.getAvatarUrl()));
+            } else {
+                // Handle the case when author is null (e.g., when the message is from a bot)
+                authorName.attr("title", "Bot");
+                authorName.text("Bot");
+                authorName.attr("data-user-id", "Bot");
+                authorAvatar.attr("src", "default_bot_avatar_url"); // replace with your default bot avatar URL
+            }
 
             authorElement.appendChild(authorAvatar);
             messageGroup.appendChild(authorElement);
@@ -122,16 +157,10 @@ public class DiscordHtmlTranscripts {
             // message content
             Element content = document.createElement("div");
             content.addClass("chatlog__messages");
-            // message author name
-            Element authorName = document.createElement("span");
-            authorName.addClass("chatlog__author-name");
-            // authorName.attr("title", author.getName()); // author.name
-            authorName.attr("title", author.getAsTag());
-            authorName.text(author.getName());
-            authorName.attr("data-user-id", author.getId());
+
             content.appendChild(authorName);
 
-            if (author.isBot()) {
+            if (author != null && author.isBot()) {
                 Element botTag = document.createElement("span");
                 botTag.addClass("chatlog__bot-tag").text("BOT");
                 content.appendChild(botTag);
@@ -152,7 +181,7 @@ public class DiscordHtmlTranscripts {
             messageContent.attr("title", "Message sent: "
                     + message.getTimeCreated().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
 
-            if (message.getContentDisplay().length() > 0) {
+            if (!message.getContentDisplay().isEmpty()) {
                 Element messageContentContent = document.createElement("div");
                 messageContentContent.addClass("chatlog__content");
 
@@ -161,13 +190,6 @@ public class DiscordHtmlTranscripts {
 
                 Element messageContentContentMarkdownSpan = document.createElement("span");
                 messageContentContentMarkdownSpan.addClass("preserve-whitespace");
-//                System.out.println(message.getContentDisplay());
-//                System.out.println(message.getContentDisplay().length());
-//                System.out.println(message.getContentStripped());
-//                System.out.println(message.getContentRaw());
-//                System.out.println(message.getContentDisplay().contains("\n"));
-//                System.out.println(message.getContentDisplay().contains("\r"));
-//                System.out.println(message.getContentDisplay().contains("\r\n"));
                 messageContentContentMarkdownSpan
                         .html(Formatter.format(message.getContentDisplay()));
 
@@ -365,13 +387,13 @@ public class DiscordHtmlTranscripts {
                             embedField.addClass(field.isInline() ? "chatlog__embed-field-inline"
                                     : "chatlog__embed-field");
 
-                            // Field nmae
+                            // Field name
                             Element embedFieldName = document.createElement("div");
                             embedFieldName.addClass("chatlog__embed-field-name");
 
                             Element embedFieldNameMarkdown = document.createElement("div");
                             embedFieldNameMarkdown.addClass("markdown preserve-whitespace");
-                            embedFieldNameMarkdown.html(field.getName());
+                            embedFieldNameMarkdown.html(Objects.requireNonNull(field.getName()));
 
                             embedFieldName.appendChild(embedFieldNameMarkdown);
                             embedField.appendChild(embedFieldName);
@@ -404,7 +426,7 @@ public class DiscordHtmlTranscripts {
 
                         Element embedThumbnailLink = document.createElement("a");
                         embedThumbnailLink.addClass("chatlog__embed-thumbnail-link");
-                        embedThumbnailLink.attr("href", embed.getThumbnail().getUrl());
+                        embedThumbnailLink.attr("href", Objects.requireNonNull(embed.getThumbnail().getUrl()));
 
                         Element embedThumbnailImage = document.createElement("img");
                         embedThumbnailImage.addClass("chatlog__embed-thumbnail");
@@ -461,7 +483,7 @@ public class DiscordHtmlTranscripts {
                         embedFooterText.text(embed.getTimestamp() != null
                                 ? embed.getFooter().getText() + " • " + embed.getTimestamp()
                                 .format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-                                : embed.getFooter().getText());
+                                : Objects.requireNonNull(embed.getFooter().getText()));
 
                         embedFooter.appendChild(embedFooterText);
 
@@ -474,16 +496,17 @@ public class DiscordHtmlTranscripts {
             }
 
             messageGroup.appendChild(content);
+            assert chatLog != null;
             chatLog.appendChild(messageGroup);
         }
         return new ByteArrayInputStream(document.outerHtml().getBytes());
     }
 
-    private File findFile(String fileName) {
-        URL url = getClass().getClassLoader().getResource(fileName);
-        if (url == null) {
-            throw new IllegalArgumentException("file is not found: " + fileName);
+    private InputStream findFile() {
+        InputStream is = getClass().getClassLoader().getResourceAsStream("template.html");
+        if (is == null) {
+            throw new IllegalArgumentException("file is not found: " + "template.html");
         }
-        return new File(url.getFile());
+        return is;
     }
 }
